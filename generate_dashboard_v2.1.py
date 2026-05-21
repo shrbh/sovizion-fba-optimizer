@@ -919,15 +919,17 @@ function parseSupplier(){
         const raw=cv(row[colMap.asin]||'');
         if(raw.trim())ids.push({type:'asin',val:normalizeId(raw)});
       }
+      let rawSku='';
       if(colMap.sku>=0){
-        const raw=cv(row[colMap.sku]||'');
-        if(raw.trim())ids.push({type:'sku',val:normalizeId(raw)});
+        rawSku=cv(row[colMap.sku]||'');
+        if(rawSku.trim())ids.push({type:'sku',val:normalizeId(rawSku)});
       }
 
       if(!ids.length){skipped++;continue;}
 
       const product={
         name,pa_net:pa,pvc,
+        sku:rawSku,
         ean: ids.find(x=>x.type==='ean')?.val ||
              ids.find(x=>x.type==='gtin_as_ean')?.val ||
              ids.find(x=>x.type==='upc')?.val ||
@@ -1087,7 +1089,7 @@ function refPct(name, cat, raw){
 
 function fbaForMkt(code,frPpf){
   let ti=FBA.FR.fees.length-1;
-  for(let i=0;i<FBA.FR.fees.length;i++){if(frPpf<=FBA.FR.fees[i][1]+0.50){ti=i;break;}}
+  for(let i=0;i<FBA.FR.fees.length;i++){if(frPpf<=FBA.FR.fees[i][1]+0.05){ti=i;break;}}
   const m=FBA[code];if(!m)return null;
   const idx=Math.min(ti,m.fees.length-1);
   const fee=Math.round(m.fees[idx][1]*FUEL*100)/100;
@@ -1146,7 +1148,7 @@ function buildProducts(supData, kpaData){
     const roi=sp.pa_net>0 ? Math.round(profit / sp.pa_net * 1000) / 10 : 0;
 
     rows.push({
-      ean:sp.ean, name:sp.name, pa_net:sp.pa_net, pvc:sp.pvc||0,
+      ean:sp.ean, sku:sp.sku||'', name:sp.name, pa_net:sp.pa_net, pvc:sp.pvc||0,
       asin:kd.asin, bb, bb_avg:avg,
       ppf:Math.round(ppf*100)/100, ref_pct:rp, ref_fee:refFee,
       vat,
@@ -1287,7 +1289,8 @@ function onSl(t,v){
   if(t==='roi'){fRoi=v;document.getElementById('v-roi').textContent=v===0?'No minimum — showing all':`ROI ≥ ${v}%`;}
   else if(t==='bb'){fBB=v;document.getElementById('v-bb').textContent=v===0?'No maximum — showing all':`Amazon BB ≤ ${v}%`;}
   else if(t==='drp'){fDrp=v;document.getElementById('v-drp').textContent=v===0?'No minimum — showing all':`Drops ≥ ${v}`;}
-  else if(t==='cst'){fCst=v;document.getElementById('v-cst').textContent=v===0?'€0.00 — no extra cost':`€${v.toFixed(2)} extra per unit`;}
+  else if(t==='cst'){fCst=v;document.getElementById('v-cst').textContent=v===0?'€0.00 — no extra cost':`€${v.toFixed(2)} extra per unit`;
+  PRODUCTS.forEach(r=>{const adjRoi=(r.pa_net+fCst)>0?Math.round((r.profit-fCst)/(r.pa_net+fCst)*1000)/10:0;r.tier=tierCalc(adjRoi,r.amazon_pct,r.stab,r.bsr_drops,r.bb_winners);});updateKPIs();}
   // V2.1
   else if(t==='vat'){fVAT=v;document.getElementById('v-vat').textContent=v===0?'0% — micro-entrepreneur':`${v}% — assujetti TVA`;rebuildProducts();updateSum();return;}
   else if(t==='bsrmax'){fBsrMax=v;document.getElementById('v-bsrmax').textContent=v===0?'No max — showing all':`BSR ≤ ${Number(v).toLocaleString()}`;}
@@ -1349,7 +1352,8 @@ function rebuildProducts(){
     r.vat=vat;
     r.profit=Math.round((r.bb - r.ppf - r.ref_fee - vat - r.pa_net) * 100) / 100;
     r.roi=r.pa_net>0 ? Math.round(r.profit / r.pa_net * 1000) / 10 : 0;
-    r.tier=tierCalc(r.roi, r.amazon_pct, r.stab, r.bsr_drops, r.bb_winners);
+    const adjRoi=(r.pa_net+fCst)>0?Math.round((r.profit-fCst)/(r.pa_net+fCst)*1000)/10:0;
+    r.tier=tierCalc(adjRoi, r.amazon_pct, r.stab, r.bsr_drops, r.bb_winners);
   });
   updateKPIs();
   applyF();
@@ -1432,7 +1436,8 @@ function getVis(){
     if(fAmzInBB==='yes' && !r.amz_is_bb) return false;
     if(q && !r.name.toLowerCase().includes(q) &&
        !(r.ean||'').includes(q) &&
-       !(r.asin||'').toLowerCase().includes(q)) return false;
+       !(r.asin||'').toLowerCase().includes(q) &&
+       !(r.sku||'').toLowerCase().includes(q)) return false;
     return true;
   });
 }
