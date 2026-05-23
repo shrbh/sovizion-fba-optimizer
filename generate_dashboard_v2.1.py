@@ -675,33 +675,47 @@ function readFile(file,type){
   dz.className='dz';
   txt.style.color='';hint.style.color='';
 
-  // FIX-04 — Essayer UTF-8 d'abord, fallback Latin-1 si mojibake
-  const reader=new FileReader();
-  reader.onload=e=>{
-    let text=e.target.result;
-    const mojibakeRatio = (text.match(/[ÃÂâ][\x80-\xBF]/g)||[]).length / Math.max(text.length, 1);
-    if(mojibakeRatio > 0.001){
-      const r2=new FileReader();
-      r2.onload=e2=>{
-        const text2=e2.target.result;
-        if(type==='sup'){ supText=text2; }
-        else { kpaText=text2; }
-        dz.className='dz done';
-        txt.textContent='✓ '+file.name+' (latin-1)';
-        hint.textContent=Math.round(file.size/1024)+'KB — ready';
-        checkReady();
-      };
-      r2.readAsText(file, 'latin1');
-      return;
-    }
-    if(type==='sup'){ supText=text; }
-    else { kpaText=text; }
-    dz.className='dz done';
-    txt.textContent='✓ '+file.name;
-    hint.textContent=Math.round(file.size/1024)+'KB — ready';
-    checkReady();
+  // FIX-04 — BOM detection first (UTF-16 LE/BE), then UTF-8, fallback Latin-1
+  const bomReader=new FileReader();
+  bomReader.onload=eb=>{
+    const arr=new Uint8Array(eb.target.result);
+    let encoding='utf-8';
+    let label='';
+    if(arr[0]===0xFF&&arr[1]===0xFE){encoding='utf-16le';label=' (utf-16)';}
+    else if(arr[0]===0xFE&&arr[1]===0xFF){encoding='utf-16be';label=' (utf-16)';}
+
+    const reader=new FileReader();
+    reader.onload=e=>{
+      let text=e.target.result;
+      // Remove UTF-16 BOM character if present
+      if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+
+      if(encoding==='utf-8'){
+        const mojibakeRatio=(text.match(/[ÃÂâ][\x80-\xBF]/g)||[]).length/Math.max(text.length,1);
+        if(mojibakeRatio>0.001){
+          const r2=new FileReader();
+          r2.onload=e2=>{
+            const text2=e2.target.result;
+            if(type==='sup'){supText=text2;}else{kpaText=text2;}
+            dz.className='dz done';
+            txt.textContent='✓ '+file.name+' (latin-1)';
+            hint.textContent=Math.round(file.size/1024)+'KB — ready';
+            checkReady();
+          };
+          r2.readAsText(file,'latin1');
+          return;
+        }
+      }
+
+      if(type==='sup'){supText=text;}else{kpaText=text;}
+      dz.className='dz done';
+      txt.textContent='✓ '+file.name+label;
+      hint.textContent=Math.round(file.size/1024)+'KB — ready';
+      checkReady();
+    };
+    reader.readAsText(file,encoding);
   };
-  reader.readAsText(file, 'utf-8');
+  bomReader.readAsArrayBuffer(file.slice(0,4));
 }
 
 function checkReady(){
