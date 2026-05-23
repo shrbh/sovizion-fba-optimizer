@@ -26,6 +26,7 @@ Tarifs FBA & référencement Amazon mis à jour : mai 2026 — à vérifier annu
 """
 
 import os, webbrowser
+from pathlib import Path
 OUT_HTML = "/Users/soso/Desktop/So Vizion Code app/So Vizion FBA Optimizer HTML/sovizion_v2_1.html"
 
 HTML = r"""<!DOCTYPE html>
@@ -1055,7 +1056,7 @@ function parseKeepa(){
 // ════════════════════════════════════════════════════════════════
 function fbaEst(p){
   if(p<8)return 3.55;if(p<13)return 4.65;if(p<22)return 5.20;
-  if(p<38)return 5.90;if(p<58)return 6.20;if(p<85)return 7.92;return 8.97;
+  if(p<38)return 5.90;if(p<58)return 6.10;if(p<85)return 7.80;return 8.84;
 }
 
 // FIX-02 — Table catégories Amazon FR (taux mai 2026, à vérifier annuellement)
@@ -1681,7 +1682,7 @@ def main():
     print("[So Vizion V2.1] Dashboard ready — VAT-aware build")
     print("="*70)
     print(f"  → {OUT_HTML}")
-    webbrowser.open(f"file://{OUT_HTML}")
+    webbrowser.open(Path(OUT_HTML).as_uri())
     print()
     print("MATCHING: EAN → GTIN → UPC → ASIN → SKU")
     print("NEW V2.1: TVA · Amazon-in-BB · BSR max · Winners max · Export PO CSV")
