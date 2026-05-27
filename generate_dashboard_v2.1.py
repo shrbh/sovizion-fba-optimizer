@@ -814,6 +814,14 @@ function goToMapping(){
     if(rows[i].filter(c=>cv(c).length>0).length>=3){headIdx=i;break;}
   }
   supHeaders=rows[headIdx].map(h=>cv(h));
+  // Numbers/Excel exports sometimes put column labels one row above the main header row.
+  // Fill any empty header positions from earlier rows (but never overwrite a non-empty one).
+  for(let prev=headIdx-1;prev>=0;prev--){
+    const prevH=rows[prev].map(h=>cv(h));
+    for(let c=0;c<Math.max(supHeaders.length,prevH.length);c++){
+      if(!supHeaders[c]&&prevH[c])supHeaders[c]=prevH[c];
+    }
+  }
   supRows=rows.slice(headIdx+1).filter(r=>r.some(c=>cv(c)));
 
   colMap={ean:-1,gtin:-1,upc:-1,asin:-1,sku:-1,name:-1,pa_net:-1,pvc:-1};
