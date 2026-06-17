@@ -60,6 +60,12 @@ log = logging.getLogger("keepa-bot")
 # ---------------------------------------------------------------------------
 KEEPA_URL = "https://keepa.com"
 
+# ---------------------------------------------------------------------------
+# Credentials — stored here so login is fully automatic.
+# ---------------------------------------------------------------------------
+KEEPA_EMAIL    = "hosseini@sovizion.com"   # ← replace with your Keepa email
+KEEPA_PASSWORD = "Metlika.8312"     # ← replace with your Keepa password
+
 # Marketplace codes used by Keepa's URL hash / UI selector
 # TODO: Verify these IDs by inspecting the marketplace dropdown in Keepa's UI.
 #       Open DevTools → Elements and look for <option> or data attributes on
@@ -247,12 +253,16 @@ def create_driver(download_dir: str) -> webdriver.Chrome:
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
         "safebrowsing.enabled": True,
-        # Disable PDF viewer so exported files download directly
         "plugins.always_open_pdf_externally": True,
+        # Disable "Save password?" popup
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False,
     }
 
     chrome_options = Options()
     chrome_options.add_experimental_option("prefs", prefs)
+    # Incognito ensures no cached session — script always logs in fresh
+    chrome_options.add_argument("--incognito")
     # Keep browser visible (not headless)
     chrome_options.add_argument("--start-maximized")
     chrome_options.add_argument("--disable-infobars")
@@ -320,7 +330,9 @@ def wait_for_download(download_dir: str, before_files: set, timeout=WAIT_LONG) -
     while time.time() < deadline:
         current = set(Path(download_dir).glob("*"))
         new_files = current - before_files
-        completed = [f for f in new_files if not f.name.endswith(".crdownload")]
+        completed = [f for f in new_files
+                     if not f.name.endswith(".crdownload")
+                     and not f.name.startswith(".com.google.Chrome")]
         if completed:
             return str(sorted(completed, key=lambda f: f.stat().st_mtime)[-1])
         time.sleep(1)
@@ -333,54 +345,79 @@ def wait_for_download(download_dir: str, before_files: set, timeout=WAIT_LONG) -
 
 def ensure_logged_in(driver: webdriver.Chrome):
     """
-    Open Keepa and wait for the user to log in manually.
-    We detect login by looking for an element that only appears when authenticated
-    (e.g., the user menu / account icon in the top-right corner).
+    Open Keepa and log in automatically using KEEPA_EMAIL / KEEPA_PASSWORD.
+    Falls back to manual login prompt if auto-login fails for any reason.
 
-    TODO: If Keepa updates its post-login indicators, adjust the selector below.
-          Look for a stable element visible only after login (user avatar, account link, etc.)
+    Logged-in detection: #panelUserRegisterLogin text changes from
+    "Log In / Register" to the username after a successful login.
     """
+    LOGIN_BTN_SELECTOR = "#panelUserRegisterLogin"
+    LOGIN_TEXT         = "Log In / Register"
+
     log.info("Opening %s", KEEPA_URL)
     driver.get(KEEPA_URL)
-
-    # Give the page a moment to load
     WebDriverWait(driver, WAIT_LONG).until(
         lambda d: d.execute_script("return document.readyState") == "complete"
     )
 
-    # Check if already logged in by looking for a post-login indicator
-    # TODO: Verify this selector — open DevTools on keepa.com after login and
-    #       find a stable element (e.g., "#user" or ".userLoggedIn" or the account icon).
-    LOGGED_IN_SELECTOR = "#user"  # Common Keepa logged-in indicator
+    def is_logged_in(d):
+        try:
+            el = d.find_element(By.CSS_SELECTOR, LOGIN_BTN_SELECTOR)
+            return LOGIN_TEXT not in el.text
+        except Exception:
+            return False
 
-    try:
-        WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, LOGGED_IN_SELECTOR))
-        )
-        log.info("Already logged in.")
-        return
-    except TimeoutException:
-        pass
+    if KEEPA_EMAIL and KEEPA_PASSWORD:
+        try:
+            log.info("Attempting automatic login…")
 
+            login_link = wait_for(
+                driver, By.CSS_SELECTOR, LOGIN_BTN_SELECTOR,
+                timeout=WAIT_SHORT, condition="clickable",
+            )
+            safe_click(driver, login_link)
+            log.info("Login panel opened.")
+            time.sleep(1.5)
+
+            email_field = wait_for(
+                driver, By.CSS_SELECTOR, "#username",
+                timeout=WAIT_MEDIUM, condition="clickable",
+            )
+            driver.execute_script("arguments[0].click();", email_field)
+            time.sleep(0.2)
+            email_field.send_keys(KEEPA_EMAIL)
+
+            pw_field = wait_for(
+                driver, By.CSS_SELECTOR, "#password",
+                timeout=WAIT_SHORT, condition="clickable",
+            )
+            driver.execute_script("arguments[0].click();", pw_field)
+            time.sleep(0.2)
+            pw_field.send_keys(KEEPA_PASSWORD)
+            pw_field.send_keys(Keys.RETURN)
+
+            # Wait for #panelUserRegisterLogin text to change from "Log In / Register"
+            WebDriverWait(driver, WAIT_MEDIUM).until(is_logged_in)
+            log.info("Auto-login successful.")
+            return
+
+        except Exception as exc:
+            log.warning("Auto-login failed (%s) — falling back to manual login.", exc)
+
+    # Manual fallback
     log.info("=" * 60)
     log.info("Please log in to Keepa manually in the browser window.")
     log.info("Once logged in, press Enter (or click the button in the dashboard).")
     log.info("=" * 60)
-    # Signal to the Flask server that login is needed; Flask sends \n back via stdin.
     print("KEEPA_BOT::WAITING_FOR_LOGIN", flush=True)
     input()
 
-    # Confirm login succeeded
     try:
-        WebDriverWait(driver, WAIT_MEDIUM).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, LOGGED_IN_SELECTOR))
-        )
+        WebDriverWait(driver, WAIT_MEDIUM).until(is_logged_in)
         log.info("Login confirmed.")
     except TimeoutException:
         log.warning(
-            "Could not confirm login via selector '%s'. "
-            "Continuing anyway — the script may fail if you are not logged in.",
-            LOGGED_IN_SELECTOR,
+            "Could not confirm login. Continuing anyway — script may fail if not logged in."
         )
 
 
@@ -732,6 +769,12 @@ def run(csv_path: str, output_dir: str, marketplace: str = "FR", column: str | N
 
         # --- Launch browser ---
         driver = create_driver(output_dir)
+
+        # Force silent downloads in incognito (prefs are ignored there)
+        driver.execute_cdp_cmd("Page.setDownloadBehavior", {
+            "behavior": "allow",
+            "downloadPath": str(Path(output_dir).resolve()),
+        })
 
         # --- Login ---
         ensure_logged_in(driver)
